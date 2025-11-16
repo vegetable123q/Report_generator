@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Mapping, Optional, Sequence
 
 import typer
 from langchain_core.messages import HumanMessage
@@ -24,6 +24,7 @@ from .agents.deep_agent import build_workspace_deep_agent
 from .mcp_client import MCPToolClient
 from .secrets import MCPServerSecrets, discover_secrets_path, load_secrets
 from .tooling import WorkspaceResponse, list_registered_tools
+from .tooling.config import CLIToolConfig, load_workspace_config
 from .tooling.llm import ModelPurpose
 from .tooling.tavily import TavilySearchClient, TavilySearchError
 
@@ -35,13 +36,6 @@ app.add_typer(docs_app, name="docs")
 agents_app = typer.Typer(help="General-purpose workspace agent workflows.")
 app.add_typer(agents_app, name="agents")
 
-# (command, label) pairs for CLI integrations that the workspace cares about.
-REGISTERED_TOOLS: Iterable[Tuple[str, str]] = (
-    ("openai", "OpenAI CLI (Codex)"),
-    ("gcloud", "Google Cloud CLI (Gemini)"),
-    ("claude", "Claude Code CLI"),
-)
-
 WORKFLOW_SUMMARIES = {
     DocumentWorkflowType.REPORT: "Business and technical reports with clear recommendations.",
     DocumentWorkflowType.PATENT_DISCLOSURE: "Patent disclosure drafts capturing inventive details.",
@@ -50,15 +44,17 @@ WORKFLOW_SUMMARIES = {
 }
 
 
-def _get_version(command: str) -> str | None:
+def _get_version(command: str, version_args: Sequence[str] | None = None) -> str | None:
     """
     Return the version string for a CLI command if available.
 
     Many CLIs support `--version` and emit to stdout; others may use stderr.
     """
     try:
+        args = [command]
+        args.extend(version_args or ("--version",))
         result = subprocess.run(
-            [command, "--version"],
+            args,
             capture_output=True,
             text=True,
             check=False,
@@ -118,10 +114,18 @@ def list_tools(
         return
 
     cli_tools = []
-    for command, label in REGISTERED_TOOLS:
-        location = shutil.which(command)
-        version = _get_version(command) if location else None
-        cli_tools.append({"command": command, "label": label, "installed": bool(location), "location": location, "version": version})
+    for tool in _cli_tool_configs():
+        location = shutil.which(tool.command)
+        version = _get_version(tool.command, tool.version_args) if location else None
+        cli_tools.append(
+            {
+                "command": tool.command,
+                "label": tool.label,
+                "installed": bool(location),
+                "location": location,
+                "version": version,
+            }
+        )
 
     if json_output:
         response = WorkspaceResponse.ok(payload={"cli_tools": cli_tools}, message="CLI tooling status.", source="local")
@@ -134,7 +138,7 @@ def list_tools(
         detail = info["version"] or "not installed"
         typer.echo(f"- {info['label']}: `{info['command']}` {status} ({detail})")
     typer.echo("")
-    typer.echo("Edit src/tiangong_ai_workspace/cli.py to customize this list.")
+    typer.echo("Edit [tool.tiangong.workspace.cli_tools] in pyproject.toml to customize this list.")
 
 
 @app.command()
@@ -159,15 +163,15 @@ def check() -> None:
 
     typer.echo("")
     typer.echo("AI coding toolchains:")
-    for command, label in REGISTERED_TOOLS:
-        location = shutil.which(command)
+    for tool in _cli_tool_configs():
+        location = shutil.which(tool.command)
         status = "[OK]" if location else "[MISSING]"
-        version = _get_version(command) if location else None
+        version = _get_version(tool.command, tool.version_args) if location else None
         detail = version or "not installed"
-        typer.echo(f"{status} {label} ({command}): {location or detail}")
+        typer.echo(f"{status} {tool.label} ({tool.command}): {location or detail}")
 
     typer.echo("")
-    typer.echo("Update src/tiangong_ai_workspace/cli.py to adjust tool detection rules.")
+    typer.echo("Update [tool.tiangong.workspace.cli_tools] in pyproject.toml to adjust tool detection rules.")
 
 
 @docs_app.command("list")
@@ -236,6 +240,11 @@ def agents_run(
     no_python: bool = typer.Option(False, "--no-python", help="Disable Python execution tool."),
     no_tavily: bool = typer.Option(False, "--no-tavily", help="Disable Tavily web search tool."),
     no_document: bool = typer.Option(False, "--no-document", help="Disable document generation tool."),
+    engine: str = typer.Option(
+        "langgraph",
+        "--engine",
+        help="Agent runtime engine (langgraph or deepagents).",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable JSON response."),
 ) -> None:
     """Run the workspace autonomous agent on a free-form task."""
@@ -248,6 +257,7 @@ def agents_run(
             include_tavily=not no_tavily,
             include_document_agent=not no_document,
             system_prompt=system_prompt,
+            engine=engine,
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         response = WorkspaceResponse.error("Failed to initialise deep agent.", errors=(str(exc),))
@@ -535,3 +545,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _cli_tool_configs() -> Sequence[CLIToolConfig]:
+    return load_workspace_config().cli_tools

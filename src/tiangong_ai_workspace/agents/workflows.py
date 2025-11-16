@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
 
-from ..tooling.llm import ModelPurpose, OpenAIModelFactory
+from ..tooling.llm import ModelPurpose, ModelRouter
 from ..tooling.tavily import TavilySearchClient, TavilySearchError
 
 TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates"
@@ -97,8 +97,8 @@ def run_document_workflow(
     language model during tests.
     """
 
-    factory = OpenAIModelFactory() if llm is None else None
-    model = llm or factory.create_chat_model(purpose=config.model_purpose, temperature=config.temperature)
+    router = ModelRouter() if llm is None else None
+    model = llm or router.create_chat_model(purpose=config.model_purpose, temperature=config.temperature)
 
     template_text = _load_template(config.workflow)
     if tavily is not None:

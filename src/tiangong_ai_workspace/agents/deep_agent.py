@@ -13,13 +13,15 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, MutableMapping, Sequence, TypedDict
 
+from deepagents import create_deep_agent
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
 
-from ..tooling.llm import OpenAIModelFactory
+from ..tooling.llm import ModelRouter
 from ..tooling.tavily import TavilySearchClient, TavilySearchError
 from .tools import create_document_tool, create_python_tool, create_shell_tool, create_tavily_tool
 
@@ -53,6 +55,7 @@ DEFAULT_SYSTEM_PROMPT = """You are the TianGong Workspace orchestrator.
 - Always respond using JSON with keys: thought, action, input, final_response (only set when action is \"finish\")."""
 
 TOOL_FALLBACK_MESSAGE = "An internal error occurred while running tool '{action}'. Include any partial results and continue."
+SUPPORTED_ENGINES = {"langgraph", "deepagents"}
 
 
 def build_workspace_deep_agent(
@@ -65,6 +68,7 @@ def build_workspace_deep_agent(
     include_document_agent: bool = True,
     system_prompt: str | None = None,
     max_iterations: int = 8,
+    engine: str = "langgraph",
 ) -> Any:
     """
     Construct and compile the workspace autonomous agent.
@@ -94,17 +98,18 @@ def build_workspace_deep_agent(
         include_document_agent=include_document_agent,
     )
 
-    planner = _build_planner_chain(planner_llm, tools, config)
+    engine_choice = engine.lower().strip()
+    if engine_choice not in SUPPORTED_ENGINES:
+        available = ", ".join(sorted(SUPPORTED_ENGINES))
+        raise ValueError(f"Unsupported agent engine '{engine}'. Available engines: {available}.")
 
-    graph = StateGraph(WorkspaceAgentState)
-    graph.add_node("plan", _make_plan_node(planner, config, tools))
-    graph.add_node("act", _make_action_node(tools))
-    graph.set_entry_point("plan")
+    tool_list = _describe_tools(tools)
 
-    graph.add_conditional_edges("plan", _make_plan_router(tools, config))
-    graph.add_edge("act", "plan")
+    if engine_choice == "deepagents":
+        chat_model = _require_chat_model(planner_llm)
+        return _build_deepagents_agent(chat_model, tools, config, tool_list)
 
-    return graph.compile()
+    return _build_langgraph_agent(planner_llm, tools, config, tool_list)
 
 
 def _initialise_tools(
@@ -140,21 +145,68 @@ def _resolve_planner_llm(*, llm: Runnable | None, model: Any | None) -> Runnable
     if hasattr(model, "invoke"):
         return model  # Already a LangChain runnable
 
-    factory = OpenAIModelFactory()
+    factory = ModelRouter()
     if isinstance(model, str):
         return factory.create_chat_model(model_override=model, temperature=0.3)
 
     return factory.create_chat_model(purpose="deep_research", temperature=0.3)
 
 
+def _build_langgraph_agent(
+    planner_llm: Runnable,
+    tools: Mapping[str, Any],
+    config: WorkspaceAgentConfig,
+    tool_list: str,
+) -> Any:
+    planner = _build_planner_chain(planner_llm, tools, config, tool_list)
+
+    graph = StateGraph(WorkspaceAgentState)
+    graph.add_node("plan", _make_plan_node(planner, config, tools))
+    graph.add_node("act", _make_action_node(tools))
+    graph.set_entry_point("plan")
+
+    graph.add_conditional_edges("plan", _make_plan_router(tools, config))
+    graph.add_edge("act", "plan")
+
+    return graph.compile()
+
+
+def _build_deepagents_agent(
+    planner_llm: BaseChatModel,
+    tools: Mapping[str, Any],
+    config: WorkspaceAgentConfig,
+    tool_list: str,
+) -> Any:
+    system_prompt = _compose_system_prompt(tool_list, config.system_prompt)
+    return create_deep_agent(
+        model=planner_llm,
+        tools=list(tools.values()),
+        system_prompt=system_prompt,
+    )
+
+
+def _describe_tools(tools: Mapping[str, Any]) -> str:
+    if not tools:
+        return "- finish: provide the final answer (no tools available)."
+    lines = []
+    for name, tool in tools.items():
+        description = getattr(tool, "description", "") or "No description."
+        lines.append(f"- {name}: {description}")
+    return "\n".join(lines)
+
+
+def _require_chat_model(model: Runnable) -> BaseChatModel:
+    if isinstance(model, BaseChatModel):
+        return model
+    raise ValueError("The deepagents engine requires a LangChain BaseChatModel-compatible llm.")
+
+
 def _build_planner_chain(
     planner_llm: Runnable,
     tools: Mapping[str, Any],
     config: WorkspaceAgentConfig,
+    tool_list: str,
 ) -> Runnable:
-    tool_list = "\n".join(f"- {name}: {tool.description or 'No description.'}" for name, tool in tools.items())
-    if not tool_list:
-        tool_list = "- finish: provide the final answer (no tools available)."
 
     prompt = ChatPromptTemplate.from_messages(
         [

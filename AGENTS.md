@@ -1,7 +1,7 @@
 # TianGong AI Workspace — Agent Guide
 
 ## Overview
-- Unified developer workspace for coordinating Codex, Gemini, Claude Code, and both document-centric & autonomous LangGraph workflows.
+- Unified developer workspace for coordinating Codex, Gemini, Claude Code, and both document-centric & autonomous LangGraph / DeepAgents workflows.
 - Python 3.12+ project managed完全 by `uv`; avoid `pip`, `poetry`, `conda`.
 - Primary entry point: `uv run tiangong-workspace`, featuring LangChain/LangGraph document agents, LangGraph planning agents, and Tavily MCP research.
 
@@ -9,16 +9,23 @@
 - `src/tiangong_ai_workspace/cli.py`: Typer CLI with `docs`, `agents`, `research`, and `mcp` subcommands plus structured JSON output support.
 - `src/tiangong_ai_workspace/agents/`:
   - `workflows.py`: LangChain/LangGraph document workflows (reports, plans, patent, proposals).
-  - `deep_agent.py`: Workspace LangGraph agent combining shell, Python, Tavily, and documentation specialists.
-  - `tools.py`: LangChain Tool wrappers for shell/Python execution, Tavily search, and document generation.
+  - `deep_agent.py`: Workspace autonomous agent supporting both native LangGraph loops and the `deepagents` runtime.
+  - `tools.py`: LangChain Tool wrappers for shell/Python execution, Tavily search, and document generation (with typed Pydantic schemas).
 - `src/tiangong_ai_workspace/tooling/`: Utilities shared by agents.
   - `responses.py`: `WorkspaceResponse` envelope for deterministic outputs.
   - `registry.py`: Tool metadata registry surfaced via `tiangong-workspace tools --catalog`.
-  - `llm.py`: OpenAI model factory (selects chat vs deep research models).
+  - `config.py`: Loads CLI/tool registry configuration from `pyproject.toml`.
+  - `tool_schemas.py`: Pydantic schemas exported to LangChain tools and registry metadata.
+  - `llm.py`: Provider-agnostic model router (OpenAI provider registered by default).
   - `tavily.py`: Tavily MCP client with retry + structured payloads.
-  - `executors.py`: Shell/Python execution helpers returning structured stdout/stderr for agent consumption.
+  - `executors.py`: Shell/Python execution helpers with timeouts, allow-lists, and structured telemetry for agent consumption.
 - `src/tiangong_ai_workspace/templates/`: Markdown scaffolds referenced by workflows.
 - `.sercrets/secrets.toml`: Local-only secrets (copy from `.sercrets/secrets.example.toml`).
+
+## Workspace Configuration
+- The `[tool.tiangong.workspace]` section inside `pyproject.toml` now controls detected CLI tools (`cli_tools`) and registry entries (`tool_registry`).
+- Updating those tables automatically refreshes `tiangong-workspace tools`/`tools --catalog` without editing Python sources.
+- Registry metadata is enriched with JSON schemas from `tooling.tool_schemas`, enabling downstream agents to understand tool inputs/outputs.
 
 ## Tooling Workflow
 Run everything through `uv`:
@@ -45,7 +52,7 @@ All three must pass before sharing updates.
 - `uv run tiangong-workspace docs list` — supported document workflows.
 - `uv run tiangong-workspace docs run <workflow> --topic ...` — generate drafts (supports `--json`, `--skip-research`, `--purpose`, etc.).
 - `uv run tiangong-workspace agents list` — view autonomous agents + runtime executors available to agents.
-- `uv run tiangong-workspace agents run "<task>" [--no-shell/--no-python/--no-tavily/--no-document]` — run the workspace DeepAgent.
+- `uv run tiangong-workspace agents run "<task>" [--no-shell/--no-python/--no-tavily/--no-document --engine langgraph|deepagents]` — run the workspace DeepAgent with the preferred backend.
 - `uv run tiangong-workspace research "<query>"` — invoke Tavily MCP search (also supports `--json`).
 - `uv run tiangong-workspace mcp services|tools|invoke` — inspect and call configured MCP services.
 
@@ -67,5 +74,8 @@ Use `--json` for machine-readable responses suitable for chaining agents.
 - To stub LLM calls in tests, inject a custom `Runnable` when calling `run_document_workflow`.
 - Tavily wrapper retries transient failures; propagate explicit `TavilySearchError` for agents to handle.
 - Register new workflows via `tooling.registry.register_tool` for discoverability.
+- Shell/Python executors enforce configurable timeouts and command allow-lists—reuse them instead of invoking `subprocess` or `exec` directly.
+- LangChain tools should depend on the schemas in `tooling.tool_schemas` so registry metadata stays consistent.
+- Choose the DeepAgents backend via `--engine deepagents` when you need its filesystem/todo middleware; ensure the supplied LLM implements `BaseChatModel`.
 - Keep logs redaction-aware if adding persistence; avoid leaking API keys.
 - Workspace agent factory accepts `model`, `include_*` flags, and additional tools/subagents. Reuse `tooling.executors` or extend `agents/tools.py` when exposing new capabilities to autonomous agents.

@@ -4,7 +4,9 @@ import json
 from typing import Any
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 
 from tiangong_ai_workspace.agents.deep_agent import build_workspace_deep_agent
@@ -92,3 +94,38 @@ def test_build_workspace_deep_agent_runs_to_completion() -> None:
     )
     result = agent.invoke({"messages": [HumanMessage(content="Test task")], "iterations": 0})
     assert result["final_response"] == "Completed task."
+
+
+class DummyChatModel(BaseChatModel):
+    """Minimal BaseChatModel implementation for deepagents engine tests."""
+
+    @property
+    def _llm_type(self) -> str:
+        return "dummy"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:  # type: ignore[override]
+        generation = ChatGeneration(message=AIMessage(content="ok"))
+        return ChatResult(generations=[generation])
+
+
+def test_build_workspace_deep_agent_deepagents_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    dummy_model = DummyChatModel()
+    stub_agent = object()
+
+    def fake_create_deep_agent(*args, **kwargs):
+        fake_create_deep_agent.called = True  # type: ignore[attr-defined]
+        fake_create_deep_agent.kwargs = kwargs  # type: ignore[attr-defined]
+        return stub_agent
+
+    monkeypatch.setattr("tiangong_ai_workspace.agents.deep_agent.create_deep_agent", fake_create_deep_agent)
+    agent = build_workspace_deep_agent(
+        llm=dummy_model,
+        include_shell=False,
+        include_python=False,
+        include_tavily=False,
+        include_document_agent=False,
+        engine="deepagents",
+    )
+    assert agent is stub_agent
+    assert getattr(fake_create_deep_agent, "called", False)
+    assert "tools" in getattr(fake_create_deep_agent, "kwargs", {})

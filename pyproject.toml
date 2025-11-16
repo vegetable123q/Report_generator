@@ -47,6 +47,77 @@ packages = ["src/tiangong_ai_workspace"]
 [tool.hatch.build.targets.sdist]
 include = ["src/tiangong_ai_workspace", "README.md", "pyproject.toml"]
 
+[tool.tiangong.workspace]
+config_version = 1
+
+[[tool.tiangong.workspace.cli_tools]]
+command = "openai"
+label = "OpenAI CLI (Codex)"
+
+[[tool.tiangong.workspace.cli_tools]]
+command = "gcloud"
+label = "Google Cloud CLI (Gemini)"
+
+[[tool.tiangong.workspace.cli_tools]]
+command = "claude"
+label = "Claude Code CLI"
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "docs.report"
+description = "Generate structured business or technical reports using the document workflow agent."
+category = "workflow"
+entrypoint = "tiangong_ai_workspace.agents.workflows.run_document_workflow"
+tags = ["document", "report"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "docs.patent_disclosure"
+description = "Draft patent disclosure sheets with optional web research."
+category = "workflow"
+entrypoint = "tiangong_ai_workspace.agents.workflows.run_document_workflow"
+tags = ["document", "patent"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "docs.plan"
+description = "Create project or execution plans with milestones and resource breakdowns."
+category = "workflow"
+entrypoint = "tiangong_ai_workspace.agents.workflows.run_document_workflow"
+tags = ["document", "planning"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "docs.project_proposal"
+description = "Prepare project proposal drafts optimised for internal reviews."
+category = "workflow"
+entrypoint = "tiangong_ai_workspace.agents.workflows.run_document_workflow"
+tags = ["document", "proposal"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "research.tavily"
+description = "Query the Tavily MCP service for live internet research."
+category = "integration"
+entrypoint = "tiangong_ai_workspace.tooling.tavily.TavilySearchClient.search"
+tags = ["research", "search"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "agents.deep"
+description = "Workspace autonomous agent built with LangGraph (shell, Python, Tavily, document workflows)."
+category = "agent"
+entrypoint = "tiangong_ai_workspace.agents.deep_agent.build_workspace_deep_agent"
+tags = ["langgraph", "planner"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "runtime.shell"
+description = "Shell executor that returns structured stdout/stderr for commands."
+category = "runtime"
+entrypoint = "tiangong_ai_workspace.tooling.executors.ShellExecutor.run"
+tags = ["shell", "commands"]
+
+[[tool.tiangong.workspace.tool_registry]]
+name = "runtime.python"
+description = "Python executor for dynamic scripting with captured stdout/stderr."
+category = "runtime"
+entrypoint = "tiangong_ai_workspace.tooling.executors.PythonExecutor.run"
+tags = ["python", "scripting"]
+
 [project.scripts]
 tiangong-workspace = "tiangong_ai_workspace.cli:app"
 
