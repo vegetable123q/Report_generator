@@ -32,6 +32,7 @@ def test_tool_registry_contains_core_workflows() -> None:
     assert "agents.deep" in registry
     assert "runtime.shell" in registry
     assert "runtime.python" in registry
+    assert "embeddings.openai_compatible" in registry
 
 
 def test_tavily_client_missing_service_raises() -> None:

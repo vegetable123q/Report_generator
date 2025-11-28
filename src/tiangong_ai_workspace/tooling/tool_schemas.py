@@ -17,6 +17,8 @@ __all__ = [
     "DocumentToolOutput",
     "DifyKnowledgeBaseInput",
     "DifyKnowledgeBaseOutput",
+    "EmbeddingGenerationInput",
+    "EmbeddingGenerationOutput",
     "MetadataFilterConditionInput",
     "MetadataFilterGroupInput",
     "RetrievalModelInput",
@@ -61,6 +63,22 @@ class PythonCommandOutput(BaseModel):
     duration: float
     timestamp: float
     timed_out: bool
+
+
+class EmbeddingGenerationInput(BaseModel):
+    texts: list[str] = Field(..., min_length=1, description="Texts to embed using the configured service.")
+    model: str | None = Field(default=None, description="Optional embedding model override.")
+    encoding_format: str = Field(default="float", description="OpenAI encoding_format value (float/base64).")
+    user: str | None = Field(default=None, description="Optional user identifier forwarded to the API.")
+
+
+class EmbeddingGenerationOutput(BaseModel):
+    status: Literal["success", "error"]
+    embeddings: list[list[float]] | None = None
+    model: str | None = None
+    dimensions: int | None = None
+    usage: Mapping[str, Any] | None = None
+    message: str | None = None
 
 
 class TavilySearchInput(BaseModel):
@@ -201,6 +219,7 @@ class _SchemaPair:
 
 
 _DESCRIPTOR_SCHEMAS: Mapping[str, _SchemaPair] = {
+    "embeddings.openai_compatible": _SchemaPair(EmbeddingGenerationInput, EmbeddingGenerationOutput),
     "runtime.shell": _SchemaPair(ShellCommandInput, ShellCommandOutput),
     "runtime.python": _SchemaPair(PythonCommandInput, PythonCommandOutput),
     "research.tavily": _SchemaPair(TavilySearchInput, TavilySearchOutput),

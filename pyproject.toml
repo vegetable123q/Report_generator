@@ -133,6 +133,13 @@ category = "runtime"
 entrypoint = "tiangong_ai_workspace.tooling.executors.PythonExecutor.run"
 tags = ["python", "scripting"]
 
+[[tool.tiangong.workspace.tool_registry]]
+name = "embeddings.openai_compatible"
+description = "Generate vector embeddings via an OpenAI-compatible endpoint."
+category = "integration"
+entrypoint = "tiangong_ai_workspace.tooling.embeddings.OpenAICompatibleEmbeddingClient.embed"
+tags = ["embedding", "vector"]
+
 [project.scripts]
 tiangong-workspace = "tiangong_ai_workspace.cli:app"
 

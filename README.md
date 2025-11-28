@@ -61,6 +61,7 @@ uv run tiangong-workspace tools         # 查看已配置的外部 CLI 列表
 uv run tiangong-workspace tools --catalog   # 查看内部工作流与工具注册表
 uv run tiangong-workspace agents list       # 查看自主智能体与运行时代码执行器
 uv run tiangong-workspace knowledge retrieve "查询关键词"  # 直接检索 Dify 知识库
+uv run tiangong-workspace embeddings generate "示例文本"   # 调用 OpenAI 兼容 embedding 服务
 ```
 
 所有支持的命令都提供 `--json` 选项，可输出结构化响应，方便被其他智能体消费。
@@ -84,6 +85,7 @@ uv run tiangong-workspace agents run "统计 data.csv 中的指标并绘图" --n
 - Dify 知识库：在本地 HTTP 直连指定 Dify 数据集以获取企业知识，无需 MCP。
 - LangGraph 文档工作流：生成报告、计划书、专利交底书、项目申报书。
 - Neo4j 图数据库：通过 `neo4j` 官方驱动执行 Cypher，并支持 create/read/update/delete 全流程操作。
+- OpenAI 兼容向量嵌入：调用本地或远程 OpenAI API 生成 embedding，默认返回结构化 JSON，可直接写入向量工作流。
 
 可使用 `--no-shell`、`--no-python`、`--no-tavily`、`--no-dify`、`--no-document` 分别关闭对应工具；`--engine langgraph|deepagents` 切换运行后端；`--system-prompt` 和 `--model` 可自定义智能体设定。
 
@@ -135,6 +137,21 @@ uv run tiangong-workspace knowledge retrieve \
 
 命令会输出结构化 `WorkspaceResponse`，若搭配 `--json` 可方便地串接其他 Agent。除了沿用 `--options` 透传底层参数外，现在也可以通过 `--search-method`、`--reranking/--no-reranking`、`--reranking-provider/--reranking-model`、`--score-threshold`、`--score-threshold-enabled/--no-score-threshold-enabled`、`--semantic-weight` 与 `--metadata` 等旗标直接组装 Dify `retrieval_model` 以及 `metadata_filtering_conditions`，使检索精准可控。
 
+## 向量嵌入
+`embeddings` 子命令调用 `.sercrets/secrets.toml` 中配置的 OpenAI 兼容服务，供本地或私有环境快速生成向量：
+
+```bash
+# 基础示例
+uv run tiangong-workspace embeddings generate "面向企业的数据治理方案"
+
+# 批量文本 + 自定义模型 + JSON 输出
+uv run tiangong-workspace embeddings generate "text A" "text B" \
+  --model Qwen/Qwen3-Embedding-0.6B \
+  --json
+```
+
+命令默认输出摘要信息，追加 `--json` 会返回包含 `embeddings`、`model`、`dimensions`、`usage` 的结构化 `WorkspaceResponse`，方便直接写入向量数据库或串接 Agent 工具。若连接到无鉴权的本地模型，可将 `api_key` 置为空字符串即可兼容。
+
 ## Secrets 配置
 1. 复制 `.sercrets/secrets.example.toml` 为 `.sercrets/secrets.toml`（保持文件不入库）。
 2. 填写 `openai.api_key`，可选配置 `model`、`chat_model`、`deep_research_model`。
@@ -170,6 +187,15 @@ dataset_id = "53a90891-853c-4bf0-bf39-96dd84e11501"
 ```
 
 配置完成后即可使用 `knowledge retrieve` 命令或 Dify LangChain Tool，无需再维护 `dify_knowledge_base_mcp` 段落。
+
+6. 若需启用 OpenAI 兼容的 embedding 生成（支持本地/私有部署服务），可按以下示例添加配置，其中 `api_key` 允许留空：
+
+```toml
+[openai_compatitble_embedding]
+url = "http://192.168.1.140:8004/v1/"
+api_key = ""
+model = "Qwen/Qwen3-Embedding-0.6B"
+```
 
 ## 自定义集成
 1. 在 `pyproject.toml` 的 `[tool.tiangong.workspace.cli_tools]` 中新增/修改 CLI 监测项，即可立刻反映到 `tiangong-workspace tools`。

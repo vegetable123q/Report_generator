@@ -17,6 +17,7 @@
   - `config.py`: Loads CLI/tool registry configuration from `pyproject.toml`.
   - `tool_schemas.py`: Pydantic schemas exported to LangChain tools and registry metadata.
   - `llm.py`: Provider-agnostic model router (OpenAI provider registered by default).
+  - `embeddings.py`: OpenAI-compatible embedding client surfaced via CLI/registry.
   - `tavily.py`: Tavily MCP client with retry + structured payloads.
   - `dify.py`: Direct HTTP client for the Dify knowledge base (no MCP required).
   - `neo4j.py`: Neo4j driver wrapper used by CRUD tools and registry metadata.
@@ -57,6 +58,7 @@ All three must pass before sharing updates.
 - `uv run tiangong-workspace agents run "<task>" [--no-shell/--no-python/--no-tavily/--no-dify/--no-document --engine langgraph|deepagents]` — run the workspace DeepAgent with the preferred backend.
 - `uv run tiangong-workspace research "<query>"` — invoke Tavily MCP search (also supports `--json`).
 - `uv run tiangong-workspace knowledge retrieve "<query>"` — call the Dify knowledge base API without MCP；可用 `--search-method`、`--reranking/--no-reranking`、`--reranking-provider/--reranking-model`、`--score-threshold`、`--semantic-weight` 与 `--metadata` 快速配置 Dify `retrieval_model` 与元数据过滤。
+- `uv run tiangong-workspace embeddings generate "<text>"` — 调用 OpenAI 兼容 embedding 服务，支持批量文本、`--model/--json`。
 - `uv run tiangong-workspace mcp services|tools|invoke` — inspect and call configured MCP services.
 
 Use `--json` for machine-readable responses suitable for chaining agents.
@@ -67,6 +69,7 @@ Use `--json` for machine-readable responses suitable for chaining agents.
 - Tavily section needs `service_name`, `url`, and `api_key` (`Authorization: Bearer` header).
 - Neo4j section (optional) defines `uri`, `username`, `password`, and `database`; when absent the Neo4j LangChain tool is automatically disabled.
 - `dify_knowledge_base` defines `api_base_url`, `api_key`, and `dataset_id`; this powers the `knowledge retrieve` CLI and the LangChain Dify tool (no MCP block required).
+- `openai_compatitble_embedding` defines `url`, optional `api_key`, and `model` for the embedding CLI/registry tool；`api_key` 可留空以兼容无鉴权服务。
 - Secrets stay local; never commit `.sercrets/`.
 
 ## Maintenance Rules

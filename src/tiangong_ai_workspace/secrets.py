@@ -30,6 +30,15 @@ class OpenAISecrets:
 
 
 @dataclass(slots=True)
+class OpenAICompatibleEmbeddingSecrets:
+    """Configuration for OpenAI-compatible embedding services."""
+
+    url: str
+    model: str
+    api_key: Optional[str] = None
+
+
+@dataclass(slots=True)
 class MCPServerSecrets:
     """Transport configuration needed to reach an MCP service."""
 
@@ -87,6 +96,7 @@ class Secrets:
 
     openai: Optional[OpenAISecrets]
     mcp_servers: Mapping[str, MCPServerSecrets]
+    openai_compatible_embedding: Optional[OpenAICompatibleEmbeddingSecrets] = None
     neo4j: Optional[Neo4jSecrets] = None
     dify_knowledge_base: Optional[DifyKnowledgeBaseSecrets] = None
 
@@ -169,12 +179,29 @@ def load_secrets(path: Optional[Path] = None) -> Secrets:
                 dataset_id=dataset_id,
             )
 
+    embedding_data = _load_embedding_section(data)
+
     return Secrets(
         openai=openai_secrets,
         mcp_servers=dict(mcp_entries),
+        openai_compatible_embedding=embedding_data,
         neo4j=neo4j_secrets,
         dify_knowledge_base=dify_secrets,
     )
+
+
+def _load_embedding_section(data: Mapping[str, Any]) -> Optional[OpenAICompatibleEmbeddingSecrets]:
+    for key in ("openai_compatitble_embedding", "openai_compatible_embedding"):
+        section = data.get(key)
+        if not isinstance(section, Mapping):
+            continue
+        url = _get_opt_str(section, "url")
+        model = _get_opt_str(section, "model")
+        if not url or not model:
+            continue
+        api_key = _get_opt_str(section, "api_key")
+        return OpenAICompatibleEmbeddingSecrets(url=url.rstrip("/"), model=model, api_key=api_key)
+    return None
 
 
 def _get_opt_str(container: Mapping[str, Any], key: str) -> Optional[str]:
@@ -208,6 +235,7 @@ def _require_str(container: Mapping[str, Any], key: str, section_name: str) -> s
 __all__ = [
     "DEFAULT_SECRETS_PATH",
     "MCPServerSecrets",
+    "OpenAICompatibleEmbeddingSecrets",
     "OpenAISecrets",
     "Neo4jSecrets",
     "DifyKnowledgeBaseSecrets",

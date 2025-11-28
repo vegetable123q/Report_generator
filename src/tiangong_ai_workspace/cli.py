@@ -26,6 +26,7 @@ from .secrets import MCPServerSecrets, discover_secrets_path, load_secrets
 from .tooling import WorkspaceResponse, list_registered_tools
 from .tooling.config import CLIToolConfig, load_workspace_config
 from .tooling.dify import DifyKnowledgeBaseClient, DifyKnowledgeBaseError
+from .tooling.embeddings import OpenAICompatibleEmbeddingClient, OpenAIEmbeddingError
 from .tooling.llm import ModelPurpose
 from .tooling.tavily import TavilySearchClient, TavilySearchError
 
@@ -38,6 +39,8 @@ agents_app = typer.Typer(help="General-purpose workspace agent workflows.")
 app.add_typer(agents_app, name="agents")
 knowledge_app = typer.Typer(help="Knowledge base utilities such as Dify dataset retrieval.")
 app.add_typer(knowledge_app, name="knowledge")
+embeddings_app = typer.Typer(help="OpenAI-compatible embedding helpers.")
+app.add_typer(embeddings_app, name="embeddings")
 
 WORKFLOW_SUMMARIES = {
     DocumentWorkflowType.REPORT: "Business and technical reports with clear recommendations.",
@@ -692,3 +695,48 @@ if __name__ == "__main__":
 
 def _cli_tool_configs() -> Sequence[CLIToolConfig]:
     return load_workspace_config().cli_tools
+
+
+@embeddings_app.command("generate")
+def embeddings_generate(
+    texts: list[str] = typer.Argument(..., help="One or more input texts to embed.", metavar="TEXT"),
+    model: str | None = typer.Option(None, "--model", help="Override the embedding model name."),
+    encoding_format: str = typer.Option("float", "--encoding-format", help="OpenAI encoding_format parameter."),
+    user: str | None = typer.Option(None, "--user", help="Optional user identifier forwarded to the API."),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable JSON response."),
+) -> None:
+    """Generate embeddings using the configured OpenAI-compatible endpoint."""
+
+    client = OpenAICompatibleEmbeddingClient()
+    try:
+        result = client.embed(
+            texts,
+            model_override=model,
+            encoding_format=encoding_format,
+            user=user,
+        )
+    except OpenAIEmbeddingError as exc:
+        response = WorkspaceResponse.error("Embedding generation failed.", errors=(str(exc),), source="embeddings")
+        _emit_response(response, json_output)
+        raise typer.Exit(code=1)
+
+    payload = WorkspaceResponse.ok(
+        payload={
+            "model": result.model,
+            "dimensions": result.dimensions,
+            "embeddings": result.embeddings,
+            "usage": dict(result.usage) if result.usage else None,
+            "warnings": list(result.warnings) if result.warnings else None,
+        },
+        message="Embeddings generated successfully.",
+        source="embeddings",
+    )
+    _emit_response(payload, json_output)
+
+    if not json_output:
+        typer.echo("")
+        typer.echo(f"Embeddings returned: {len(result.embeddings)} vectors (dimension={result.dimensions or 'unknown'}).")
+        if result.warnings:
+            typer.echo("Warnings:")
+            for note in result.warnings:
+                typer.echo(f"- {note}")
