@@ -25,6 +25,7 @@ from .mcp_client import MCPToolClient
 from .secrets import MCPServerSecrets, discover_secrets_path, load_secrets
 from .tooling import WorkspaceResponse, list_registered_tools
 from .tooling.config import CLIToolConfig, load_workspace_config
+from .tooling.crossref import CrossrefClient, CrossrefClientError
 from .tooling.dify import DifyKnowledgeBaseClient, DifyKnowledgeBaseError
 from .tooling.embeddings import OpenAICompatibleEmbeddingClient, OpenAIEmbeddingError
 from .tooling.llm import ModelPurpose
@@ -41,6 +42,8 @@ knowledge_app = typer.Typer(help="Knowledge base utilities such as Dify dataset 
 app.add_typer(knowledge_app, name="knowledge")
 embeddings_app = typer.Typer(help="OpenAI-compatible embedding helpers.")
 app.add_typer(embeddings_app, name="embeddings")
+crossref_app = typer.Typer(help="Crossref metadata utilities.")
+app.add_typer(crossref_app, name="crossref")
 
 WORKFLOW_SUMMARIES = {
     DocumentWorkflowType.REPORT: "Business and technical reports with clear recommendations.",
@@ -247,6 +250,7 @@ def agents_run(
     no_tavily: bool = typer.Option(False, "--no-tavily", help="Disable Tavily web search tool."),
     no_dify: bool = typer.Option(False, "--no-dify", help="Disable Dify knowledge base tool."),
     no_document: bool = typer.Option(False, "--no-document", help="Disable document generation tool."),
+    no_crossref: bool = typer.Option(False, "--no-crossref", help="Disable Crossref journal works tool."),
     engine: str = typer.Option(
         "langgraph",
         "--engine",
@@ -264,6 +268,7 @@ def agents_run(
             include_tavily=not no_tavily,
             include_dify_knowledge=not no_dify,
             include_document_agent=not no_document,
+            include_crossref=not no_crossref,
             system_prompt=system_prompt,
             engine=engine,
         )
@@ -544,6 +549,91 @@ def research(
     if not json_output:
         typer.echo("")
         typer.echo("Top-level research result:")
+        typer.echo(_format_result(result.get("result")))
+
+
+@crossref_app.command("journal-works")
+def crossref_journal_works(
+    issn: str = typer.Argument(..., help="Journal ISSN (e.g. 1234-5678)."),
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Optional query string applied to works."),
+    filters: Optional[str] = typer.Option(
+        None,
+        "--filters",
+        "-f",
+        help="Crossref filters as JSON (object/array) or raw filter string (e.g. from-pub-date:2020-01-01).",
+    ),
+    sort: Optional[str] = typer.Option(None, "--sort", help="Crossref sort field (score, published, updated, etc.)."),
+    order: Optional[str] = typer.Option(None, "--order", help="Sort direction (asc or desc)."),
+    rows: Optional[int] = typer.Option(
+        None,
+        "--rows",
+        min=1,
+        max=1000,
+        help="Maximum results to return (1-1000).",
+    ),
+    offset: Optional[int] = typer.Option(None, "--offset", min=0, help="Offset for pagination (incompatible with cursor)."),
+    cursor: Optional[str] = typer.Option(None, "--cursor", help="Cursor token for deep paging ('*' for first page)."),
+    cursor_max: Optional[int] = typer.Option(None, "--cursor-max", min=0, help="Maximum records scanned with cursor."),
+    sample: Optional[int] = typer.Option(None, "--sample", min=1, help="Random sample size (cannot combine with cursor)."),
+    select: Optional[str] = typer.Option(None, "--select", help="Fields to return (comma-separated or JSON array)."),
+    mailto: Optional[str] = typer.Option(None, "--mailto", help="Contact email forwarded to Crossref (recommended)."),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable JSON response."),
+) -> None:
+    """Call Crossref's `/journals/{issn}/works` endpoint."""
+
+    filter_payload: Any | None = None
+    if filters:
+        try:
+            parsed_filters = json.loads(filters)
+        except json.JSONDecodeError:
+            filter_payload = filters
+        else:
+            if isinstance(parsed_filters, (Mapping, list, str)):
+                filter_payload = parsed_filters
+            else:
+                typer.secho("--filters must decode to a JSON object, array, or string.", fg=typer.colors.RED)
+                raise typer.Exit(code=17)
+
+    select_payload: Any | None = None
+    if select:
+        try:
+            parsed_select = json.loads(select)
+        except json.JSONDecodeError:
+            select_payload = select
+        else:
+            if isinstance(parsed_select, (list, str)):
+                select_payload = parsed_select
+            else:
+                typer.secho("--select must decode to a JSON string or array.", fg=typer.colors.RED)
+                raise typer.Exit(code=18)
+
+    try:
+        client = CrossrefClient()
+        result = client.list_journal_works(
+            issn,
+            query=query,
+            filters=filter_payload,
+            sort=sort,
+            order=order,
+            rows=rows,
+            offset=offset,
+            cursor=cursor,
+            cursor_max=cursor_max,
+            sample=sample,
+            select=select_payload,
+            mailto=mailto,
+        )
+    except CrossrefClientError as exc:
+        response = WorkspaceResponse.error("Crossref query failed.", errors=(str(exc),), source="crossref")
+        _emit_response(response, json_output)
+        raise typer.Exit(code=19)
+
+    response = WorkspaceResponse.ok(payload=result, message="Crossref journal works query completed.", source="crossref")
+    _emit_response(response, json_output)
+
+    if not json_output:
+        typer.echo("")
+        typer.echo("Crossref response overview:")
         typer.echo(_format_result(result.get("result")))
 
 

@@ -171,6 +171,13 @@ DEFAULT_REGISTRY_ENTRIES: tuple[RegistryEntryConfig, ...] = (
         tags=("research", "search"),
     ),
     RegistryEntryConfig(
+        name="research.crossref_journal_works",
+        description="Fetch works for a journal using Crossref's /journals/{issn}/works endpoint.",
+        category="integration",
+        entrypoint="tiangong_ai_workspace.tooling.crossref.CrossrefClient.list_journal_works",
+        tags=("research", "crossref", "literature"),
+    ),
+    RegistryEntryConfig(
         name="agents.deep",
         description="Workspace autonomous agent built with LangGraph (shell, Python, Tavily, document workflows).",
         category="agent",

@@ -9,11 +9,14 @@ from typing import Any, Mapping, Optional, Sequence
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
+from ..tooling.crossref import CrossrefClient, CrossrefClientError
 from ..tooling.dify import DifyKnowledgeBaseClient, DifyKnowledgeBaseError
 from ..tooling.executors import PythonExecutor, ShellExecutor
 from ..tooling.neo4j import Neo4jClient, Neo4jToolError
 from ..tooling.tavily import TavilySearchClient, TavilySearchError
 from ..tooling.tool_schemas import (
+    CrossrefJournalWorksInput,
+    CrossrefQueryOutput,
     DifyKnowledgeBaseInput,
     DifyKnowledgeBaseOutput,
     DocumentToolInput,
@@ -34,6 +37,7 @@ from .workflows import DocumentWorkflowConfig, DocumentWorkflowType, run_documen
 
 __all__ = [
     "create_document_tool",
+    "create_crossref_tool",
     "create_dify_knowledge_tool",
     "create_neo4j_tool",
     "create_python_tool",
@@ -195,3 +199,48 @@ def create_document_tool(*, name: str = "generate_document") -> Any:
         return payload.model_dump()
 
     return generate_document
+
+
+def create_crossref_tool(client: Optional[CrossrefClient] = None, *, name: str = "crossref_journal_works") -> Any:
+    crossref_client = client or CrossrefClient()
+
+    @tool(name, args_schema=CrossrefJournalWorksInput)
+    def crossref_journal_works(
+        issn: str,
+        query: str | None = None,
+        filters: Mapping[str, Any] | Sequence[str] | str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
+        rows: int | None = None,
+        offset: int | None = None,
+        cursor: str | None = None,
+        cursor_max: int | None = None,
+        sample: int | None = None,
+        select: Sequence[str] | str | None = None,
+        mailto: str | None = None,
+    ) -> Mapping[str, Any]:
+        """List works published in a journal via Crossref's journals/ISSN/works endpoint."""
+
+        try:
+            result = crossref_client.list_journal_works(
+                issn,
+                query=query,
+                filters=filters,
+                sort=sort,
+                order=order,
+                rows=rows,
+                offset=offset,
+                cursor=cursor,
+                cursor_max=cursor_max,
+                sample=sample,
+                select=select,
+                mailto=mailto,
+            )
+        except CrossrefClientError as exc:
+            payload = CrossrefQueryOutput(status="error", message=str(exc))
+            return payload.model_dump()
+
+        payload = CrossrefQueryOutput(status="success", data=result)
+        return payload.model_dump()
+
+    return crossref_journal_works

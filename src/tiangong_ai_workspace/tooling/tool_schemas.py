@@ -13,6 +13,8 @@ from typing import Any, Literal, Mapping, MutableMapping
 from pydantic import BaseModel, Field
 
 __all__ = [
+    "CrossrefJournalWorksInput",
+    "CrossrefQueryOutput",
     "DocumentToolInput",
     "DocumentToolOutput",
     "DifyKnowledgeBaseInput",
@@ -87,6 +89,30 @@ class TavilySearchInput(BaseModel):
 
 
 class TavilySearchOutput(BaseModel):
+    status: Literal["success", "error"]
+    data: Mapping[str, Any] | None = None
+    message: str | None = None
+
+
+class CrossrefJournalWorksInput(BaseModel):
+    issn: str = Field(..., description="ISSN of the journal to query (e.g. 1234-5678).")
+    query: str | None = Field(default=None, description="Optional free-text query applied to works.")
+    filters: Mapping[str, Any] | list[str] | str | None = Field(
+        default=None,
+        description="Crossref filter expressions (mapping, list of strings, or pre-composed filter string).",
+    )
+    sort: str | None = Field(default=None, description="Crossref sort field (e.g. score, published, updated).")
+    order: Literal["asc", "desc"] | None = Field(default=None, description="Sort direction for Crossref results.")
+    rows: int | None = Field(default=None, ge=1, le=1000, description="Maximum results to return (1-1000).")
+    offset: int | None = Field(default=None, ge=0, description="Offset for offset-based pagination.")
+    cursor: str | None = Field(default=None, description="Cursor token for deep paging (`*` for first page).")
+    cursor_max: int | None = Field(default=None, ge=0, description="Maximum records scanned when using cursor.")
+    sample: int | None = Field(default=None, ge=1, description="Random sample size (incompatible with cursor).")
+    select: list[str] | str | None = Field(default=None, description="Comma-separated fields to include in the response.")
+    mailto: str | None = Field(default=None, description="Optional contact email forwarded to Crossref.")
+
+
+class CrossrefQueryOutput(BaseModel):
     status: Literal["success", "error"]
     data: Mapping[str, Any] | None = None
     message: str | None = None
@@ -225,6 +251,7 @@ _DESCRIPTOR_SCHEMAS: Mapping[str, _SchemaPair] = {
     "research.tavily": _SchemaPair(TavilySearchInput, TavilySearchOutput),
     "knowledge.dify": _SchemaPair(DifyKnowledgeBaseInput, DifyKnowledgeBaseOutput),
     "database.neo4j": _SchemaPair(Neo4jCommandInput, Neo4jCommandOutput),
+    "research.crossref_journal_works": _SchemaPair(CrossrefJournalWorksInput, CrossrefQueryOutput),
     "docs.report": _SchemaPair(DocumentToolInput, DocumentToolOutput),
     "docs.patent_disclosure": _SchemaPair(DocumentToolInput, DocumentToolOutput),
     "docs.plan": _SchemaPair(DocumentToolInput, DocumentToolOutput),

@@ -12,6 +12,7 @@ from langchain_core.runnables import Runnable
 from tiangong_ai_workspace.agents.deep_agent import build_workspace_deep_agent
 from tiangong_ai_workspace.secrets import DifyKnowledgeBaseSecrets, MCPServerSecrets, Neo4jSecrets, Secrets
 from tiangong_ai_workspace.tooling import PythonExecutor, ShellExecutor, WorkspaceResponse, list_registered_tools
+from tiangong_ai_workspace.tooling.crossref import CrossrefClient, CrossrefClientError
 from tiangong_ai_workspace.tooling.dify import DifyKnowledgeBaseClient, DifyKnowledgeBaseError
 from tiangong_ai_workspace.tooling.neo4j import Neo4jClient, Neo4jToolError
 from tiangong_ai_workspace.tooling.tavily import TavilySearchClient, TavilySearchError
@@ -33,6 +34,7 @@ def test_tool_registry_contains_core_workflows() -> None:
     assert "runtime.shell" in registry
     assert "runtime.python" in registry
     assert "embeddings.openai_compatible" in registry
+    assert "research.crossref_journal_works" in registry
 
 
 def test_tavily_client_missing_service_raises() -> None:
@@ -105,6 +107,53 @@ def test_dify_client_retrieve(monkeypatch: pytest.MonkeyPatch) -> None:
     assert filters["logical_operator"] == "and"
     assert filters["conditions"][0]["name"] == "tag"
     assert captured["headers"]["Authorization"] == "Bearer dataset-123"
+
+
+def test_crossref_client_list_journal_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = CrossrefClient(timeout=1.0)
+    captured: dict[str, Any] = {}
+
+    class _StubResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> Mapping[str, Any]:
+            return {"message": {"items": [{"title": ["Example"]}], "total-results": 1}}
+
+    def fake_get(self, url: str, *, params: Mapping[str, Any], headers: Mapping[str, str]):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        return _StubResponse()
+
+    monkeypatch.setattr(CrossrefClient, "_get", fake_get, raising=False)
+
+    result = client.list_journal_works(
+        "1234-5678",
+        query="ai",
+        filters={"from-pub-date": "2020-01-01", "until-pub-date": "2020-12-31"},
+        sort="published",
+        order="asc",
+        rows=5,
+        select=["title", "DOI"],
+        mailto="test@example.com",
+    )
+
+    assert captured["url"].endswith("/journals/1234-5678/works")
+    assert captured["params"]["query"] == "ai"
+    assert "from-pub-date:2020-01-01" in captured["params"]["filter"]
+    assert captured["params"]["order"] == "asc"
+    assert captured["params"]["rows"] == 5
+    assert captured["params"]["select"] == "title,DOI"
+    assert captured["params"]["mailto"] == "test@example.com"
+    assert result["issn"] == "1234-5678"
+    assert result["result"]["message"]["total-results"] == 1
+
+
+def test_crossref_client_rejects_offset_and_cursor() -> None:
+    client = CrossrefClient()
+    with pytest.raises(CrossrefClientError):
+        client.list_journal_works("1234-5678", offset=1, cursor="*")
 
 
 def test_shell_executor_runs_command() -> None:

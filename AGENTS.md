@@ -10,7 +10,7 @@
 - `src/tiangong_ai_workspace/agents/`:
   - `workflows.py`: LangChain/LangGraph document workflows (reports, plans, patent, proposals).
   - `deep_agent.py`: Workspace autonomous agent supporting both native LangGraph loops and the `deepagents` runtime.
-  - `tools.py`: LangChain Tool wrappers for shell/Python execution, Tavily search, Neo4j CRUD, and document generation (with typed Pydantic schemas).
+  - `tools.py`: LangChain Tool wrappers for shell/Python execution, Tavily search, Crossref journal lookups, Neo4j CRUD, and document generation (with typed Pydantic schemas).
 - `src/tiangong_ai_workspace/tooling/`: Utilities shared by agents.
   - `responses.py`: `WorkspaceResponse` envelope for deterministic outputs.
   - `registry.py`: Tool metadata registry surfaced via `tiangong-workspace tools --catalog`.
@@ -19,6 +19,7 @@
   - `llm.py`: Provider-agnostic model router (OpenAI provider registered by default).
   - `embeddings.py`: OpenAI-compatible embedding client surfaced via CLI/registry.
   - `tavily.py`: Tavily MCP client with retry + structured payloads.
+  - `crossref.py`: HTTP client for Crossref Works API `/journals/{issn}/works`.
   - `dify.py`: Direct HTTP client for the Dify knowledge base (no MCP required).
   - `neo4j.py`: Neo4j driver wrapper used by CRUD tools and registry metadata.
   - `executors.py`: Shell/Python execution helpers with timeouts, allow-lists, and structured telemetry for agent consumption.
@@ -55,8 +56,9 @@ All three must pass before sharing updates.
 - `uv run tiangong-workspace docs list` — supported document workflows.
 - `uv run tiangong-workspace docs run <workflow> --topic ...` — generate drafts (supports `--json`, `--skip-research`, `--purpose`, `--ai-review`, etc.).
 - `uv run tiangong-workspace agents list` — view autonomous agents + runtime executors available to agents.
-- `uv run tiangong-workspace agents run "<task>" [--no-shell/--no-python/--no-tavily/--no-dify/--no-document --engine langgraph|deepagents]` — run the workspace DeepAgent with the preferred backend.
+- `uv run tiangong-workspace agents run "<task>" [--no-shell/--no-python/--no-tavily/--no-dify/--no-crossref/--no-document --engine langgraph|deepagents]` — run the workspace DeepAgent with the preferred backend.
 - `uv run tiangong-workspace research "<query>"` — invoke Tavily MCP search (also supports `--json`).
+- `uv run tiangong-workspace crossref journal-works "<issn>" [--query ...]` — fetch journal works via Crossref `/journals/{issn}/works`.
 - `uv run tiangong-workspace knowledge retrieve "<query>"` — call the Dify knowledge base API without MCP；可用 `--search-method`、`--reranking/--no-reranking`、`--reranking-provider/--reranking-model`、`--score-threshold`、`--semantic-weight` 与 `--metadata` 快速配置 Dify `retrieval_model` 与元数据过滤。
 - `uv run tiangong-workspace embeddings generate "<text>"` — 调用 OpenAI 兼容 embedding 服务，支持批量文本、`--model/--json`。
 - `uv run tiangong-workspace mcp services|tools|invoke` — inspect and call configured MCP services.
