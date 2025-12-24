@@ -149,7 +149,10 @@ class DifyKnowledgeBaseClient:
     _config: DifyKnowledgeBaseSecrets = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        loaded = self.secrets or load_secrets()
+        try:
+            loaded = self.secrets or load_secrets()
+        except FileNotFoundError as exc:
+            raise DifyKnowledgeBaseError(str(exc)) from exc
         config = loaded.dify_knowledge_base
         if config is None:
             raise DifyKnowledgeBaseError("Dify knowledge base secrets are not configured.")

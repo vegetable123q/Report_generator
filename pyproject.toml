@@ -92,6 +92,13 @@ entrypoint = "tiangong_ai_workspace.agents.workflows.run_document_workflow"
 tags = ["document", "proposal"]
 
 [[tool.tiangong.workspace.tool_registry]]
+name = "docs.newsletter"
+description = "Generate regulation newsletters with clustered stacked charts and policy tables."
+category = "workflow"
+entrypoint = "tiangong_ai_workspace.newsletter.generate_newsletter"
+tags = ["document", "newsletter", "report"]
+
+[[tool.tiangong.workspace.tool_registry]]
 name = "research.tavily"
 description = "Query the Tavily MCP service for live internet research."
 category = "integration"
@@ -168,6 +175,7 @@ tiangong-workspace = "tiangong_ai_workspace.cli:app"
 line-length = 192
 target-version = ["py312"]
 include = "\\.pyi?$"
+extend-exclude = "(^|/)(\\.venv)/"
 
 [tool.ruff]
 line-length = 192

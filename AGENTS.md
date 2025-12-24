@@ -56,6 +56,8 @@ All three must pass before sharing updates.
 - `uv run tiangong-workspace tools --catalog` — list internal agent workflows from the registry.
 - `uv run tiangong-workspace docs list` — supported document workflows.
 - `uv run tiangong-workspace docs run <workflow> --topic ...` — generate drafts (supports `--json`, `--skip-research`, `--purpose`, `--ai-review`, etc.).
+- `uv run tiangong-workspace newsletter generate --output-dir outputs` — build regulation newsletter with clustered stacked chart + policy table (exports `regulation_newsletter.docx` by default; `--no-docx` disables; default policy rows: 12; summary cap: 50 chars).
+- `uv run tiangong-workspace newsletter export-docx --markdown-path outputs/regulation_newsletter.md --output-dir outputs` — export DOCX from an edited markdown (useful when Codex post-processes bold emphasis in Summary + Key Insights).
 - `uv run tiangong-workspace agents list` — view autonomous agents + runtime executors available to agents.
 - `uv run tiangong-workspace agents run "<task>" [--no-shell/--no-python/--no-tavily/--no-dify/--no-crossref/--no-openalex/--no-document --engine langgraph|deepagents]` — run the workspace DeepAgent with the preferred backend.
 - `uv run tiangong-workspace research "<query>"` — invoke Tavily MCP search (also supports `--json`).

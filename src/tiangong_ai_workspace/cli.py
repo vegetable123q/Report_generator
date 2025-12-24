@@ -22,6 +22,7 @@ from . import __version__
 from .agents import DocumentWorkflowConfig, DocumentWorkflowType, run_document_workflow
 from .agents.deep_agent import build_workspace_deep_agent
 from .mcp_client import MCPToolClient
+from .newsletter import NewsletterConfig, export_newsletter_docx, generate_newsletter
 from .secrets import MCPServerSecrets, discover_secrets_path, load_secrets
 from .tooling import WorkspaceResponse, list_registered_tools
 from .tooling.config import CLIToolConfig, load_workspace_config
@@ -47,6 +48,8 @@ crossref_app = typer.Typer(help="Crossref metadata utilities.")
 app.add_typer(crossref_app, name="crossref")
 openalex_app = typer.Typer(help="OpenAlex metadata utilities.")
 app.add_typer(openalex_app, name="openalex")
+newsletter_app = typer.Typer(help="Generate regulation newsletters from parsed CSV data.")
+app.add_typer(newsletter_app, name="newsletter")
 
 WORKFLOW_SUMMARIES = {
     DocumentWorkflowType.REPORT: "Business and technical reports with clear recommendations.",
@@ -388,7 +391,112 @@ def docs_run(
         if ai_review and result.get("ai_review"):
             typer.echo("")
             typer.echo("# --- AI Review ---")
-            typer.echo(result.get("ai_review", ""))
+        typer.echo(result.get("ai_review", ""))
+
+
+@newsletter_app.command("generate")
+def newsletter_generate(
+    csv_path: Path = typer.Option(
+        Path("tb_parse_result_detail_info.csv"),
+        "--csv-path",
+        help="Path to the parsed CSV file (tb_parse_result_detail_info.csv).",
+        exists=True,
+        readable=True,
+        resolve_path=True,
+        hidden=True,
+    ),
+    output_dir: Path = typer.Option(
+        Path("outputs"),
+        "--output-dir",
+        "-o",
+        help="Directory where the newsletter markdown and chart will be written.",
+        resolve_path=True,
+    ),
+    max_policies: int = typer.Option(
+        12,
+        "--max-policies",
+        min=1,
+        help="Maximum number of policy rows to render in the table.",
+    ),
+    first_run: bool = typer.Option(
+        False,
+        "--first-run",
+        help="Treat this as the first generation: chart shows a single stacked New bar per indicator (no Previous baseline).",
+    ),
+    ai_emphasis: bool = typer.Option(
+        True,
+        "--ai-emphasis/--no-ai-emphasis",
+        help="Use an LLM to condense the policy table summaries (bold emphasis is handled by the Codex workflow prompt).",
+    ),
+    export_docx: bool = typer.Option(
+        True,
+        "--docx/--no-docx",
+        help="Export a Word document (DOCX) with the chart embedded via pandoc.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable JSON response."),
+) -> None:
+    """Generate a regulation newsletter with chart and policy table."""
+
+    try:
+        config = NewsletterConfig(
+            csv_path=csv_path,
+            output_dir=output_dir,
+            max_policies=max_policies,
+            first_run=first_run,
+            ai_emphasis=ai_emphasis,
+            export_docx=export_docx,
+        )
+        result = generate_newsletter(config)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        response = WorkspaceResponse.error("Newsletter generation failed.", errors=(str(exc),))
+        _emit_response(response, json_output)
+        raise typer.Exit(code=30) from exc
+
+    response = WorkspaceResponse.ok(payload=result, message="Newsletter generated.")
+    _emit_response(response, json_output)
+
+    if not json_output:
+        typer.echo("")
+        typer.echo(f"Markdown: {result['markdown_path']}")
+        typer.echo(f"Chart    : {result['chart_path']}")
+        if result.get("docx_path"):
+            typer.echo(f"Word     : {result['docx_path']}")
+
+
+@newsletter_app.command("export-docx")
+def newsletter_export_docx(
+    markdown_path: Path = typer.Option(
+        Path("outputs/regulation_newsletter.md"),
+        "--markdown-path",
+        help="Path to an existing regulation_newsletter.md file.",
+        exists=True,
+        readable=True,
+        resolve_path=True,
+    ),
+    output_dir: Path = typer.Option(
+        Path("outputs"),
+        "--output-dir",
+        "-o",
+        help="Directory where the DOCX will be written.",
+        resolve_path=True,
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable JSON response."),
+) -> None:
+    """Export a Word document (DOCX) from an existing newsletter markdown file."""
+
+    try:
+        docx_path = export_newsletter_docx(markdown_path, output_dir)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        response = WorkspaceResponse.error("DOCX export failed.", errors=(str(exc),))
+        _emit_response(response, json_output)
+        raise typer.Exit(code=31) from exc
+
+    response = WorkspaceResponse.ok(payload={"docx_path": docx_path}, message="DOCX exported.")
+    _emit_response(response, json_output)
+
+    if not json_output:
+        typer.echo("")
+        typer.echo(f"Word     : {docx_path}")
 
 
 # --------------------------------------------------------------------------- MCP

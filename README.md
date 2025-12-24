@@ -61,6 +61,7 @@ uv run tiangong-workspace tools         # 查看已配置的外部 CLI 列表
 uv run tiangong-workspace tools --catalog   # 查看内部工作流与工具注册表
 uv run tiangong-workspace agents list       # 查看自主智能体与运行时代码执行器
 uv run tiangong-workspace knowledge retrieve "查询关键词"  # 直接检索 Dify 知识库
+uv run tiangong-workspace newsletter generate --output-dir outputs  # 生成法规 newsletter（含柱状图+政策表）
 uv run tiangong-workspace crossref journal-works "1234-5678" --query "LLM"  # 查询 Crossref 期刊文献
 uv run tiangong-workspace openalex work "10.1016/S0921-3449(00)00060-4"      # 获取 OpenAlex 元数据
 uv run tiangong-workspace openalex cited-by "W2072484418" --from 2020-01-01 --to 2021-01-01  # 时间窗引用统计
@@ -112,6 +113,18 @@ uv run tiangong-workspace docs run report \
 - `--purpose`：模型用途提示（`general`、`deep_research`、`creative`）。
 - `--language`：设置输出语言（默认中文）。
 - `--ai-review`：在草稿生成后执行一次自动评审，输出可执行的修改建议。
+
+## 法规 Newsletter 自动生成
+- 命令：`uv run tiangong-workspace newsletter generate --output-dir outputs`
+- 首次生成：加 `--first-run` 时仅展示 Impact（High/Medium/Low）单柱堆叠，不显示 Previous。
+- Policy Table：默认最多输出 12 条（可用 `--max-policies` 覆盖）；默认启用 `--ai-emphasis` 仅用于用 LLM 将摘要压缩为 50 字以内的“一句完整短句”（不使用省略号；不可用时回退到规则摘要）；加粗强调由 Codex 执行 Prompt 在生成后统一处理，且只允许出现在「内容概要/链接」与「Key Insights」中。
+- 实施日期：只保留不超过 `2025-12` 的完整日期，并优先选择更接近 2025 年的条目。
+- 产出：`regulation_update_chart.png`（簇状堆叠柱形图）+ `regulation_newsletter.md`（含 Policy Table）。
+- 图表：默认为簇状堆叠（Previous 灰色单柱 vs Impact 堆叠），`--first-run` 仅显示 Impact 单柱堆叠；图例位于图内右上角。
+- Word：默认额外导出 `regulation_newsletter.docx`（`--no-docx` 可关闭），图表会被直接嵌入到 Word 中。
+- Word（仅导出）：`uv run tiangong-workspace newsletter export-docx --markdown-path outputs/regulation_newsletter.md --output-dir outputs`
+- 政策表：指标、政策名称、内容概要/链接、适用产品、适用行业、实施日期；Word 导出会统一将字体设为黑色并应用三线表样式。
+- Codex 执行 Prompt：`prompts/newsletter/workflow.md`（按该文件步骤即可一键生成最终 Word 交付物）。
 
 执行成功后 CLI 会输出结构化结果，包含草稿，启用 `--ai-review` 时还会附带评审意见。
 
