@@ -117,14 +117,17 @@ uv run tiangong-workspace docs run report \
 ## 法规 Newsletter 自动生成
 - 命令：`uv run tiangong-workspace newsletter generate --output-dir outputs`
 - 首次生成：加 `--first-run` 时仅展示 Impact（High/Medium/Low）单柱堆叠，不显示 Previous。
+- 工作流：加 `--workflow 2025` 时仅统计实施日期在 `2024-01` 到 `2025-12`（含）范围内的条目；图表改为单系列柱状图（不堆叠），Policy Table 仅按日期窗口筛选。
 - Policy Table：默认最多输出 12 条（可用 `--max-policies` 覆盖）；默认启用 `--ai-emphasis` 仅用于用 LLM 将摘要压缩为 50 字以内的“一句完整短句”（不使用省略号；不可用时回退到规则摘要）；加粗强调由 Codex 执行 Prompt 在生成后统一处理，且只允许出现在「内容概要/链接」与「Key Insights」中。
 - 实施日期：只保留不超过 `2025-12` 的完整日期，并优先选择更接近 2025 年的条目。
 - 产出：`regulation_update_chart.png`（簇状堆叠柱形图）+ `regulation_newsletter.md`（含 Policy Table）。
 - 图表：默认为簇状堆叠（Previous 灰色单柱 vs Impact 堆叠），`--first-run` 仅显示 Impact 单柱堆叠；图例位于图内右上角。
 - Word：默认额外导出 `regulation_newsletter.docx`（`--no-docx` 可关闭），图表会被直接嵌入到 Word 中。
 - Word（仅导出）：`uv run tiangong-workspace newsletter export-docx --markdown-path outputs/regulation_newsletter.md --output-dir outputs`
-- 政策表：指标、政策名称、内容概要/链接、适用产品、适用行业、实施日期；Word 导出会统一将字体设为黑色并应用三线表样式。
+- 政策表：生态设计指标类别、政策名称、内容概要/链接、适用产品、适用行业、实施日期；适用产品/适用行业会自动做英文→中文映射，且适用产品超过 5 项时会自动精简并追加“等电力装备”；Word 导出会统一将字体设为黑色并应用三线表样式。
+- 图表标题：Word 导出会将 `Regulation Update Chart` 标题居中且不额外加粗（加粗仅来自 Markdown 的 `**...**`）。
 - Codex 执行 Prompt：`prompts/newsletter/workflow.md`（按该文件步骤即可一键生成最终 Word 交付物）。
+- Codex 执行 Prompt（2024-01~2025-12）：`prompts/newsletter/workflow_2025.md`。
 
 执行成功后 CLI 会输出结构化结果，包含草稿，启用 `--ai-review` 时还会附带评审意见。
 

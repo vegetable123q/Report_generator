@@ -19,6 +19,8 @@ Generate the final Word deliverable for the regulation update newsletter based o
 - AI bold emphasis must appear only in “内容概要/链接” and “Key Insights” (no bold anywhere else).
 - All Word text must be black; table should be three-line style; chart caption must be centered below the image and read exactly `Regulation Update Chart`.
 - Do not include “Regulation Update Newsletter” anywhere.
+- Policy table header must use `生态设计指标类别` (not `Indicator`).
+- If “适用产品” contains more than 5 items, keep 5 most relevant items, then append `等电力装备` (avoid overly long lists).
 
 ## Steps
 1. Run newsletter generation (first-run chart mode; skip DOCX for now):
@@ -32,6 +34,7 @@ Generate the final Word deliverable for the regulation update newsletter based o
      - Summary column: bold 1–2 key requirement/impact phrases and/or key numbers per row.
      - Key Insights: bold key numbers, proportions, and priority conclusions (≤2 bold segments per bullet).
      - Do not add bold anywhere else (policy name/products/segments/dates/impact rules must remain plain).
+   - If “适用产品” is too long (>5 items), keep 5 most relevant, then append `等电力装备`.
    - If needed, re-run step 1 to refresh content, then re-apply this step.
 4. Export the final DOCX from the edited markdown:
    - `uv run tiangong-workspace newsletter export-docx --markdown-path outputs/regulation_newsletter.md --output-dir outputs --json`

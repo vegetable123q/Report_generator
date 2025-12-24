@@ -22,7 +22,7 @@ from . import __version__
 from .agents import DocumentWorkflowConfig, DocumentWorkflowType, run_document_workflow
 from .agents.deep_agent import build_workspace_deep_agent
 from .mcp_client import MCPToolClient
-from .newsletter import NewsletterConfig, export_newsletter_docx, generate_newsletter
+from .newsletter import NewsletterConfig, NewsletterWorkflow, export_newsletter_docx, generate_newsletter
 from .secrets import MCPServerSecrets, discover_secrets_path, load_secrets
 from .tooling import WorkspaceResponse, list_registered_tools
 from .tooling.config import CLIToolConfig, load_workspace_config
@@ -412,6 +412,11 @@ def newsletter_generate(
         help="Directory where the newsletter markdown and chart will be written.",
         resolve_path=True,
     ),
+    workflow: NewsletterWorkflow = typer.Option(
+        NewsletterWorkflow.DEFAULT,
+        "--workflow",
+        help="Workflow preset for generation (default or 2025).",
+    ),
     max_policies: int = typer.Option(
         12,
         "--max-policies",
@@ -441,6 +446,7 @@ def newsletter_generate(
         config = NewsletterConfig(
             csv_path=csv_path,
             output_dir=output_dir,
+            workflow=workflow,
             max_policies=max_policies,
             first_run=first_run,
             ai_emphasis=ai_emphasis,

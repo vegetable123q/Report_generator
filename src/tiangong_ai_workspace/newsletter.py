@@ -12,10 +12,16 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date
+from enum import Enum
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence
 
 TEMPLATES_ROOT = Path(__file__).resolve().parent / "templates"
+
+
+class NewsletterWorkflow(str, Enum):
+    DEFAULT = "default"
+    WINDOW_2024_2025 = "2025"
 
 
 @dataclass(slots=True)
@@ -24,6 +30,7 @@ class NewsletterConfig:
 
     csv_path: Path
     output_dir: Path
+    workflow: NewsletterWorkflow = NewsletterWorkflow.DEFAULT
     max_policies: int = 12
     first_run: bool = False
     ai_emphasis: bool = True
@@ -43,24 +50,39 @@ def generate_newsletter(config: NewsletterConfig) -> Mapping[str, str]:
     entries = _load_entries(config.csv_path)
     _apply_balanced_impact_labels(entries)
     _annotate_csv_with_impact(config.csv_path)
-    chart_path = _render_chart(entries, config.output_dir, first_run=config.first_run)
     cutoff = _implementation_cutoff(config.max_implementation_year, config.max_implementation_month)
+    implementation_start: date | None = None
+    chart_style = "default"
+    table_filter_mode = "strict"
+    if config.workflow == NewsletterWorkflow.WINDOW_2024_2025:
+        implementation_start = date(2024, 1, 1)
+        cutoff = date(2025, 12, 31)
+        chart_style = "single"
+        table_filter_mode = "date_only"
+
+    workflow_entries: Sequence[MutableMapping[str, object]] = entries
+    if implementation_start is not None:
+        workflow_entries = _filter_entries_by_implementation_date_range(entries, start=implementation_start, end=cutoff)
+
+    chart_path = _render_chart(workflow_entries, config.output_dir, first_run=config.first_run, chart_style=chart_style)
     policy_table = _build_policy_table(
-        entries,
+        workflow_entries,
         max_rows=config.max_policies,
         ai_emphasis=config.ai_emphasis,
         implementation_cutoff=cutoff,
+        implementation_start=implementation_start,
+        filter_mode=table_filter_mode,
     )
-    insights = list(_build_insights(entries, first_run=config.first_run))
+    insights = list(_build_insights(workflow_entries, first_run=config.first_run))
 
     template_path = TEMPLATES_ROOT / "newsletter.md"
     template = template_path.read_text(encoding="utf-8")
 
     impact_rules_text = "\n".join(
         [
-            "- `Low`：适用行业为空/`N/A`，或与施耐德相关性较弱的通用信息。",
-            "- `Medium`：命中行业/领域关键词（如工业、数据中心、能源等）或政策/环保关键词（如能效、排放、标准等），但缺少明确产品/技术指向。",
-            "- `High`：在 `Medium` 基础上，进一步命中施耐德/电气/能效产品关键词（如 UPS、断路器、控制器等），或与施耐德/电气相关信息更直接。",
+            "- `Low`：信息偏通用，且对业务/产品的指向不明确，整体影响较小。",
+            "- `Medium`：与能效/减排/标准合规等方向相关，可能影响部分行业或场景，但要求较宽泛。",
+            "- `High`：直接涉及电气与配电、能效设备、数据中心/工业等典型场景，可能带来明确合规要求或产品适配/改造。",
         ]
     )
 
@@ -378,6 +400,10 @@ def _postprocess_docx(docx_path: Path) -> None:
             rpr = style.find("w:rPr", ns)
             if rpr is None:
                 rpr = ET.SubElement(style, _qn("w:rPr"))
+            for bold_tag in ("w:b", "w:bCs"):
+                bold = rpr.find(bold_tag, ns)
+                if bold is not None:
+                    rpr.remove(bold)
             color = rpr.find("w:color", ns)
             if color is None:
                 color = ET.SubElement(rpr, _qn("w:color"))
@@ -415,15 +441,15 @@ def _postprocess_docx(docx_path: Path) -> None:
             if jc is None:
                 jc = ET.SubElement(ppr, _qn("w:jc"))
             jc.set(_qn("w:val"), "center")
-            # Make the caption bold.
+            # Keep the caption plain (no bold) and black.
             for run in para.findall("w:r", ns):
                 rpr = run.find("w:rPr", ns)
                 if rpr is None:
                     rpr = ET.SubElement(run, _qn("w:rPr"))
-                bold = rpr.find("w:b", ns)
-                if bold is None:
-                    bold = ET.SubElement(rpr, _qn("w:b"))
-                bold.set(_qn("w:val"), "1")
+                for bold_tag in ("w:b", "w:bCs"):
+                    bold = rpr.find(bold_tag, ns)
+                    if bold is not None:
+                        rpr.remove(bold)
                 color = rpr.find("w:color", ns)
                 if color is None:
                     color = ET.SubElement(rpr, _qn("w:color"))
@@ -691,7 +717,37 @@ def _should_include_entry(entry: Mapping[str, object]) -> bool:
     return True
 
 
-def _render_chart(entries: Sequence[Mapping[str, object]], output_dir: Path, *, first_run: bool) -> str:
+def _filter_entries_by_implementation_date_range(
+    entries: Sequence[MutableMapping[str, object]],
+    *,
+    start: date,
+    end: date,
+) -> list[MutableMapping[str, object]]:
+    """
+    Filter entries by implementation date range.
+
+    For workflow_2025 mode, only keep entries with implementation dates between start and end,
+    regardless of validity status (to include all 2024-2025 entries in the chart).
+    """
+    filtered: list[MutableMapping[str, object]] = []
+    for entry in entries:
+        extracted = _extract_implementation_date(entry, cutoff=end)
+        if extracted is None:
+            continue
+        _, extracted_date = extracted
+        if extracted_date < start:
+            continue
+        filtered.append(entry)
+    return filtered
+
+
+def _render_chart(
+    entries: Sequence[Mapping[str, object]],
+    output_dir: Path,
+    *,
+    first_run: bool,
+    chart_style: str = "default",
+) -> str:
     _ensure_matplotlib_cache(output_dir)
 
     import matplotlib.pyplot as plt
@@ -705,6 +761,70 @@ def _render_chart(entries: Sequence[Mapping[str, object]], output_dir: Path, *, 
         "PKG & Operation",
         "Life Extension",
     ]
+
+    # For workflow_2025 (chart_style == "single"), we need to show all entries including "Others"
+    if chart_style == "single":
+        # Count all entries by indicator, including Others
+        indicator_counts = {}
+        for item in entries:
+            indicator = str(item.get("indicator") or "Others")
+            # Normalize indicator names (handle underscores)
+            indicator = indicator.replace("_", " ").replace("&", "&").strip()
+            if indicator == "Others" or not indicator:
+                indicator = "Others"
+            indicator_counts[indicator] = indicator_counts.get(indicator, 0) + 1
+
+        # Get all unique indicators found in the data, with special ones first
+        all_indicators = list(indicators)  # Start with known indicators
+        for ind in indicator_counts.keys():
+            if ind not in all_indicators:
+                all_indicators.append(ind)
+
+        # Prepare counts for all indicators
+        indicator_to_count = {ind: indicator_counts.get(ind, 0) for ind in all_indicators}
+
+        x = np.arange(len(all_indicators))
+        width = 0.36
+        output_dir.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(11, 6.5))
+
+        bars = ax.bar(x, [indicator_to_count[ind] for ind in all_indicators], width * 1.6, color="#3b82f6")
+        for bar, height in zip(bars, [indicator_to_count[ind] for ind in all_indicators]):
+            if height <= 0:
+                continue
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + 0.05,
+                f"{int(height)}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color="black",
+                clip_on=True,
+            )
+
+        ax.set_xticks(x, all_indicators, rotation=10, ha="right")
+        ax.margins(x=0.02)
+        ax.set_axisbelow(True)
+        ax.grid(axis="y", linestyle="--", alpha=0.25)
+
+        max_val = int(max([indicator_to_count[ind] for ind in all_indicators], default=0))
+        y_max = max(4, int(np.ceil(max_val * 1.15)))
+        ax.set_ylim(0, y_max)
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
+        ax.set_ylabel("Count", color="black")
+        ax.set_title("")
+        ax.tick_params(axis="both", colors="black")
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_color("black")
+
+        chart_path = output_dir / "regulation_update_chart.png"
+        fig.tight_layout()
+        fig.savefig(chart_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        return str(chart_path)
+
+    # Original logic for default mode
     prev_counts = {indicator: 0 for indicator in indicators}
     new_counts_high = {indicator: 0 for indicator in indicators}
     new_counts_med = {indicator: 0 for indicator in indicators}
@@ -714,6 +834,7 @@ def _render_chart(entries: Sequence[Mapping[str, object]], output_dir: Path, *, 
         indicator = item.get("indicator")
         if indicator not in indicators:
             continue
+
         validity = str(item.get("validity") or "")
         if validity == "现行有效":
             impact = str(item.get("impact") or _impact_label_for_entry(item))
@@ -819,22 +940,30 @@ def _build_policy_table(
     *,
     ai_emphasis: bool,
     implementation_cutoff: date,
+    implementation_start: date | None = None,
+    filter_mode: str = "strict",
 ) -> str:
     rows: list[str] = []
     doc_priority = {"laws and regulations": 0, "policy": 1, "standard": 2, "": 3}
 
     candidates_high: list[_PolicyRowCandidate] = []
     candidates_other: list[_PolicyRowCandidate] = []
+    candidates_all: list[_PolicyRowCandidate] = []
     for entry in entries:
-        if str(entry.get("document_type")) not in {"policy", "laws and regulations", ""}:
-            continue
-        if str(entry.get("validity") or "") != "现行有效":
-            continue
-        if _segments_are_na(entry.get("segment") or []):
-            continue
         implementation_date = _extract_implementation_date(entry, cutoff=implementation_cutoff)
         if implementation_date is None:
             continue
+        _, implementation_date_obj = implementation_date
+        if implementation_start is not None and implementation_date_obj < implementation_start:
+            continue
+
+        if filter_mode == "strict":
+            if str(entry.get("document_type")) not in {"policy", "laws and regulations", ""}:
+                continue
+            if str(entry.get("validity") or "") != "现行有效":
+                continue
+            if _segments_are_na(entry.get("segment") or []):
+                continue
 
         indicator = str(entry.get("indicator") or "Others")
         schneider_score = _schneider_relevance_score(entry)
@@ -845,11 +974,11 @@ def _build_policy_table(
         products = entry.get("product_category") or []
         product_text = (_format_product_categories(products) or "—").replace("**", "")
         segments = entry.get("segment") or []
-        segment_text = (", ".join(str(s) for s in segments) or "—").replace("**", "")
+        segment_text = (_format_segments(segments) or "—").replace("**", "")
         issue_date, issue_date_obj = implementation_date
 
         candidate = _PolicyRowCandidate(
-            indicator=indicator,
+            indicator=_indicator_to_cn(indicator),
             doc_type=str(entry.get("document_type") or ""),
             schneider_score=schneider_score,
             policy_name=policy_name,
@@ -861,11 +990,14 @@ def _build_policy_table(
             issue_date_obj=issue_date_obj,
         )
 
-        impact = str(entry.get("impact") or _impact_label_for_entry(entry))
-        if impact == "High":
-            candidates_high.append(candidate)
+        if filter_mode == "strict":
+            impact = str(entry.get("impact") or _impact_label_for_entry(entry))
+            if impact == "High":
+                candidates_high.append(candidate)
+            else:
+                candidates_other.append(candidate)
         else:
-            candidates_other.append(candidate)
+            candidates_all.append(candidate)
 
     def _sort_key(item: _PolicyRowCandidate) -> tuple[int, int, int]:
         return (
@@ -875,12 +1007,17 @@ def _build_policy_table(
         )
 
     def _prepare_candidates(items: list[_PolicyRowCandidate]) -> list[_PolicyRowCandidate]:
-        candidates_2025 = [item for item in items if item.issue_date_obj.year == 2025]
-        candidates_older = [item for item in items if item.issue_date_obj.year != 2025]
+        preferred_year = 2025 if filter_mode == "strict" else None
+        items = list(items)
+        if preferred_year is None:
+            items.sort(key=_sort_key, reverse=True)
+            return items
 
-        candidates_2025.sort(key=_sort_key, reverse=True)
-        candidates_older.sort(key=_sort_key, reverse=True)
-        return candidates_2025 + candidates_older
+        preferred = [item for item in items if item.issue_date_obj.year == preferred_year]
+        others = [item for item in items if item.issue_date_obj.year != preferred_year]
+        preferred.sort(key=_sort_key, reverse=True)
+        others.sort(key=_sort_key, reverse=True)
+        return preferred + others
 
     def _pick_diverse(sorted_candidates: list[_PolicyRowCandidate], limit: int) -> list[_PolicyRowCandidate]:
         if not sorted_candidates or limit <= 0:
@@ -902,12 +1039,16 @@ def _build_policy_table(
         selected.extend(remaining[: limit - len(selected)])
         return selected
 
-    high_sorted = _prepare_candidates(candidates_high)
-    other_sorted = _prepare_candidates(candidates_other)
+    if filter_mode == "strict":
+        high_sorted = _prepare_candidates(candidates_high)
+        other_sorted = _prepare_candidates(candidates_other)
 
-    selected = _pick_diverse(high_sorted, max_rows)
-    if len(selected) < max_rows:
-        selected.extend(_pick_diverse(other_sorted, max_rows - len(selected)))
+        selected = _pick_diverse(high_sorted, max_rows)
+        if len(selected) < max_rows:
+            selected.extend(_pick_diverse(other_sorted, max_rows - len(selected)))
+    else:
+        all_sorted = _prepare_candidates(candidates_all)
+        selected = _pick_diverse(all_sorted, max_rows)
 
     selected = _shorten_policy_summaries(selected, use_ai=ai_emphasis, max_chars=50)
 
@@ -932,7 +1073,7 @@ def _build_policy_table(
             + " |"
         )
 
-    header = "| Indicator | 政策名称 | 内容概要/链接 | 适用产品 | 适用行业 | 实施日期 |\n|---|---|---|---|---|---|"
+    header = "| 生态设计指标类别 | 政策名称 | 内容概要/链接 | 适用产品 | 适用行业 | 实施日期 |\n|---|---|---|---|---|---|"
     return header + ("\n" + "\n".join(rows) if rows else "")
 
 
@@ -1259,19 +1400,16 @@ def _format_product_categories(values: Iterable[str | object]) -> str:
     if not tokens:
         return ""
 
-    def _is_relevant_token(token: str) -> bool:
-        lowered = token.lower()
-        if any(keyword in lowered for keyword in _SCHNEIDER_KEYWORDS):
-            return True
-        if _is_se_product(token):
-            return True
-        if any(keyword.lower() in lowered for keyword in _PRODUCT_TEXT_KEYWORDS):
-            return True
-        return False
-
-    relevant = [token for token in tokens if _is_relevant_token(token)]
-    if relevant:
-        tokens = relevant
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for token in tokens:
+        key = re.sub(r"\s+", "", token.strip().lower())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(token)
+    tokens = deduped
+    original_count = len(tokens)
 
     common_terms = (
         "residualcurrentoperatedcircuit-breakerwithintegralovercurrentprotection",
@@ -1397,14 +1535,172 @@ def _format_product_categories(values: Iterable[str | object]) -> str:
                 return _title_preserve_acronyms(expanded)
         return _title_preserve_acronyms(value)
 
-    pretty = [_prettify(token) for token in tokens]
-
     max_items = 5
-    shown = pretty[:max_items]
-    remaining = len(pretty) - len(shown)
-    if remaining > 0:
-        shown.append(f"(+{remaining})")
-    return ", ".join(shown)
+
+    def _score_token(token: str) -> int:
+        lowered = token.lower()
+        score = 0
+        if any(keyword in lowered for keyword in _SCHNEIDER_KEYWORDS):
+            score += 100
+        if _is_se_product(token):
+            score += 50
+        if any(keyword.lower() in lowered for keyword in _PRODUCT_TEXT_KEYWORDS):
+            score += 20
+        return score
+
+    if original_count > max_items:
+        ranked = sorted(
+            enumerate(tokens),
+            key=lambda item: (_score_token(item[1]), -item[0]),
+            reverse=True,
+        )
+        keep = {idx for idx, _ in ranked[:max_items]}
+        selected = [token for idx, token in enumerate(tokens) if idx in keep][:max_items]
+    else:
+        selected = tokens
+
+    pretty = [_product_to_cn(_prettify(token)) for token in selected]
+    rendered = "、".join(pretty)
+    if original_count > max_items:
+        return rendered + "等电力装备"
+    return rendered
+
+
+_INDICATOR_CN_MAP: Mapping[str, str] = {
+    "Material & Substance": "材料与物质",
+    "Recirculation": "循环再利用",
+    "Energy Efficiency": "能源效率",
+    "PKG & Operation": "包装与运营",
+    "Life Extension": "延长寿命",
+    "Others": "其他",
+}
+
+
+def _indicator_to_cn(indicator: str) -> str:
+    value = str(indicator or "").strip()
+    if not value:
+        return "其他"
+    return _INDICATOR_CN_MAP.get(value, value)
+
+
+_SEGMENT_CN_MAP: Mapping[str, str] = {
+    "industrial": "工业",
+    "building": "建筑",
+    "commercialbuilding": "商业建筑",
+    "residential": "住宅",
+    "transportation": "交通",
+    "utilities": "公用事业",
+    "newenergy": "新能源",
+    "retail": "零售",
+    "water": "水务",
+    "water&wastewater": "水务与污水处理",
+    "waterandwastewater": "水务与污水处理",
+    "waterwastewater": "水务与污水处理",
+    "electronic": "电子",
+    "electronicindustry": "电子行业",
+    "automobile": "汽车",
+    "automotive": "汽车制造",
+    "datacenter": "数据中心",
+    "telecom": "通信",
+    "telecomcommmunicationindustry": "电信/通信行业",
+    "poweroem": "电力设备制造商",
+    "education": "教育",
+    "healthcare": "医疗",
+    "marine": "海事/船舶",
+    "oilgas": "油气",
+    "oil&gas": "油气",
+    "mining": "矿业",
+    "mineralsmetals": "矿产与金属",
+    "minerals&metals": "矿产与金属",
+    "lifescience": "生命科学",
+    "foodbeverage": "食品饮料",
+    "food&beverage": "食品饮料",
+    "printing": "印刷",
+    "textile": "纺织",
+    "leather": "皮革",
+    "woodworking": "木工",
+    "furniture": "家具",
+    "cement": "水泥",
+    "electricvehicle": "电动汽车",
+    "hvachoist": "暖通空调/起重机",
+    "otherhvachoist": "其他:暖通空调/起重机",
+}
+
+
+def _segment_to_cn(segment: str) -> str:
+    value = str(segment or "").strip()
+    if not value:
+        return ""
+    if not value.isascii():
+        return value
+    key = re.sub(r"[^a-z0-9]+", "", value.lower())
+    return _SEGMENT_CN_MAP.get(key, value)
+
+
+def _format_segments(values: Iterable[str | object]) -> str:
+    segments: list[str] = []
+    for raw in values or []:
+        text = str(raw or "").strip()
+        if not text or text.upper() == "N/A":
+            continue
+        segments.append(_segment_to_cn(text))
+    if not segments:
+        return ""
+    seen = set()
+    deduped: list[str] = []
+    for seg in segments:
+        key = re.sub(r"\s+", "", seg)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(seg)
+    return "、".join(deduped)
+
+
+_PRODUCT_CN_MAP: Mapping[str, str] = {
+    "schneider": "施耐德",
+    "schneider electric": "施耐德",
+    "ups": "UPS（不间断电源）",
+    "pdu": "PDU（配电单元）",
+    "breaker": "断路器",
+    "circuit breaker": "断路器",
+    "miniature circuit breaker": "小型断路器（MCB）",
+    "residual current device": "漏电保护器（RCD）",
+    "arc fault detection device": "电弧故障检测装置（AFDD）",
+    "arcfaultdetectiondevice": "电弧故障检测装置（AFDD）",
+    "programmable logic controller": "可编程逻辑控制器（PLC）",
+    "human machine interface": "人机界面（HMI）",
+    "power supply": "电源",
+    "transformer": "变压器",
+    "switch": "开关",
+    "controller": "控制器",
+    "relay": "继电器",
+    "contactor": "接触器",
+    "drive": "变频器",
+    "meter": "电表",
+    "cooling": "制冷设备",
+    "chiller": "冷水机组",
+    "rack": "机柜",
+    "roomlevelairconditioning": "房间级空调",
+}
+
+
+def _product_to_cn(product: str) -> str:
+    value = str(product or "").strip()
+    if not value:
+        return ""
+    if not value.isascii():
+        return value
+    lower = value.lower().strip()
+    if lower in _PRODUCT_CN_MAP:
+        return _PRODUCT_CN_MAP[lower]
+    compact = re.sub(r"[^a-z0-9]+", "", lower)
+    if compact in _PRODUCT_CN_MAP:
+        return _PRODUCT_CN_MAP[compact]
+    for needle, replacement in _PRODUCT_CN_MAP.items():
+        if needle and needle in lower:
+            return replacement
+    return value
 
 
 def _shorten_policy_summaries(items: Sequence[_PolicyRowCandidate], *, use_ai: bool, max_chars: int) -> list[_PolicyRowCandidate]:
@@ -1491,18 +1787,35 @@ def _emphasise(text: object) -> str:
     return value
 
 
-def _linkify(text: str) -> str:
-    """Legacy helper retained for backward compatibility; keep plain text for DOCX black styling."""
-    return str(text or "")
-
-
 def _build_insights(entries: Sequence[Mapping[str, object]], *, first_run: bool) -> Sequence[str]:
+    """
+    Build insights summary for the newsletter.
+
+    For workflow_2025 mode, counts all entries in the date range (not just "现行有效").
+    For default mode, only counts "现行有效" entries.
+    """
     if not entries:
         return ["数据为空，未生成洞察。"]
 
+    # Detect if we're in a filtered date range workflow (check if entries have varied validity)
+    # If all/most entries have implementation dates, assume workflow_2025 mode
+    has_implementation_dates = sum(1 for e in entries if _extract_implementation_date(e, cutoff=date(2099, 12, 31)) is not None)
+    is_date_filtered_workflow = has_implementation_dates > len(entries) * 0.8
+
     indicator_counts: dict[str, int] = {}
-    new_entries = [e for e in entries if str(e.get("validity")) == "现行有效" and str(e.get("indicator") or "") != "Others"]
-    for entry in new_entries:
+    if is_date_filtered_workflow:
+        # For workflow_2025: count all entries in the date range (ignore validity)
+        all_entries = list(entries)
+        # For indicator breakdown, exclude Others
+        entries_for_indicator_count = [e for e in entries if str(e.get("indicator") or "") != "Others"]
+        workflow_label = "时间范围内条目"
+    else:
+        # For default workflow: only count "现行有效" entries
+        all_entries = [e for e in entries if str(e.get("validity")) == "现行有效"]
+        entries_for_indicator_count = [e for e in entries if str(e.get("validity")) == "现行有效" and str(e.get("indicator") or "") != "Others"]
+        workflow_label = "现行有效条目"
+
+    for entry in entries_for_indicator_count:
         indicator = str(entry.get("indicator") or "Others")
         indicator_counts[indicator] = indicator_counts.get(indicator, 0) + 1
     ranked_indicators = sorted(indicator_counts.items(), key=lambda item: item[1], reverse=True)
@@ -1519,7 +1832,7 @@ def _build_insights(entries: Sequence[Mapping[str, object]], *, first_run: bool)
     low_total = 0
     medium_total = 0
     high_total = 0
-    for entry in new_entries:
+    for entry in all_entries:
         if str(entry.get("indicator") or "") not in chart_indicators:
             continue
         impact = str(entry.get("impact") or _impact_label_for_entry(entry))
@@ -1534,14 +1847,17 @@ def _build_insights(entries: Sequence[Mapping[str, object]], *, first_run: bool)
     high_ratio = f"{(high_total / total * 100):.1f}%" if total else "0%"
 
     summary_lines = [
-        f"现行有效条目共 {len(new_entries)} 条，其中 {top_indicator} 更新最集中（{indicator_counts.get(top_indicator, 0)} 条）。",
+        f"{workflow_label}共 {len(all_entries)} 条，其中 {top_indicator} 更新最集中（{indicator_counts.get(top_indicator, 0)} 条）。",
         f"Impact 分布：Low {low_total} / Medium {medium_total} / High {high_total}（High 占 {high_ratio}）。",
         "高影响条目优先反映与电气设备、能效、合规认证/标准相关的要求变化。",
         "重点关注电力装备、建筑/园区、数据中心、制造业等场景下的合规变化与机会点。",
         "可结合产品线与客户行业分布，优先评估高影响条目对认证、材料合规与能效指标的影响。",
     ]
     if second_indicator:
-        summary_lines.insert(1, f"其次为 {second_indicator}（{indicator_counts.get(second_indicator, 0)} 条）。")
+        summary_lines.insert(
+            1,
+            f"其次为 {second_indicator}（{indicator_counts.get(second_indicator, 0)} 条）。",
+        )
     return summary_lines
 
 

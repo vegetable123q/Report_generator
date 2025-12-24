@@ -82,7 +82,7 @@ def test_policy_table_prioritises_schneider_relevance() -> None:
     table = newsletter._build_policy_table(entries, max_rows=2, ai_emphasis=False, implementation_cutoff=date(2025, 12, 31))
     data_lines = [line for line in table.splitlines()[2:] if line.startswith("| ")]
     assert len(data_lines) == 2
-    assert "Schneider" in data_lines[0]
+    assert "施耐德" in data_lines[0]
 
 
 def test_policy_table_summary_is_capped() -> None:
@@ -173,4 +173,57 @@ def test_policy_table_excludes_na_segments() -> None:
     table = newsletter._build_policy_table(entries, max_rows=10, ai_emphasis=False, implementation_cutoff=date(2025, 12, 31))
     data_lines = [line for line in table.splitlines()[2:] if line.startswith("| ")]
     assert len(data_lines) == 1
-    assert "Recirculation" in data_lines[0]
+    assert "循环再利用" in data_lines[0]
+
+
+def test_policy_table_date_only_mode_allows_empty_segments() -> None:
+    entries = [
+        {
+            "indicator": "Material & Substance",
+            "validity": "失效",
+            "document_type": "standard",
+            "topics": "",
+            "abstract": "A",
+            "product_category": [],
+            "segment": [],
+            "validity_date": "2024-02-01",
+            "issue_date": "",
+        },
+        {
+            "indicator": "Recirculation",
+            "validity": "现行有效",
+            "document_type": "policy",
+            "topics": "",
+            "abstract": "B",
+            "product_category": [],
+            "segment": [],
+            "validity_date": "2024-03-01",
+            "issue_date": "",
+        },
+    ]
+
+    table = newsletter._build_policy_table(
+        entries,
+        max_rows=10,
+        ai_emphasis=False,
+        implementation_cutoff=date(2025, 12, 31),
+        implementation_start=date(2024, 1, 1),
+        filter_mode="date_only",
+    )
+    data_lines = [line for line in table.splitlines()[2:] if line.startswith("| ")]
+    assert len(data_lines) == 2
+
+
+def test_format_product_categories_truncates_with_suffix() -> None:
+    rendered = newsletter._format_product_categories(
+        [
+            "Schneider",
+            "UPS",
+            "PDU",
+            "Breaker",
+            "Switch",
+            "Transformer",
+        ]
+    )
+    assert rendered.endswith("等电力装备")
+    assert "(+" not in rendered
